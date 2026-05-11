@@ -1,1 +1,456 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Bell, Plus, Trash2, Settings, Play, Square, AlertTriangle, Volume2, VolumeX, Calendar, Clock, Download } from 'lucide-react';
 
+export default function App() {
+  // --- State ---
+  const [reminders, setReminders] = useState([]);
+  const [text, setText] = useState('');
+  
+  // Advanced Settings State
+  const [mode, setMode] = useState('interval'); // 'interval' or 'schedule'
+  const [intervalVal, setIntervalVal] = useState('15');
+  const [unit, setUnit] = useState('minutes');
+  const [scheduledTime, setScheduledTime] = useState('09:00');
+  const [selectedDays, setSelectedDays] = useState([1, 2, 3, 4, 5]); // 0=Sun, 1=Mon...
+  
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [notificationPermission, setNotificationPermission] = useState('default');
+  const [showSettings, setShowSettings] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
+
+  const DAYS = [
+    { id: 1, label: 'M' }, { id: 2, label: 'T' }, { id: 3, label: 'W' },
+    { id: 4, label: 'T' }, { id: 5, label: 'F' }, { id: 6, label: 'S' }, { id: 0, label: 'S' }
+  ];
+
+  // --- Initialization, PWA & Permissions ---
+  useEffect(() => {
+    // Check Notification Permission
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+
+    // Load saved reminders
+    const saved = localStorage.getItem('neoGlassReminders');
+    if (saved) setReminders(JSON.parse(saved));
+
+    // Dynamic PWA Manifest Injection (Looks for /icon.png in your public folder)
+    const manifest = {
+      name: "RemindMe Neo",
+      short_name: "RemindMe",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#0f0f0f",
+      theme_color: "#ffffff",
+      icons: [{ src: "/icon.png", sizes: "192x192", type: "image/png" }]
+    };
+    const stringManifest = JSON.stringify(manifest);
+    const blob = new Blob([stringManifest], {type: 'application/json'});
+    const manifestURL = URL.createObjectURL(blob);
+    
+    let link = document.querySelector('link[rel="manifest"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'manifest';
+      document.head.appendChild(link);
+    }
+    link.href = manifestURL;
+
+    // Handle Install Prompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    });
+  }, []);
+
+  // Save to local storage whenever reminders change
+  useEffect(() => {
+    localStorage.setItem('neoGlassReminders', JSON.stringify(reminders));
+  }, [reminders]);
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+    }
+  };
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') setInstallPrompt(null);
+  };
+
+  // --- Core Timer Logic ---
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date();
+      const currentMs = now.getTime();
+      const currentDay = now.getDay();
+      const currentHours = now.getHours().toString().padStart(2, '0');
+      const currentMinutes = now.getMinutes().toString().padStart(2, '0');
+      const timeString = `${currentHours}:${currentMinutes}`;
+      
+      setReminders(prev => {
+        let updated = false;
+        const newReminders = prev.map(reminder => {
+          if (!reminder.active) return reminder;
+
+          // Interval Logic
+          if (reminder.mode === 'interval' && currentMs >= reminder.nextRun) {
+            triggerNotification(reminder);
+            updated = true;
+            return { ...reminder, nextRun: currentMs + reminder.intervalMs };
+          }
+          
+          // Schedule Logic (Daily at specific time)
+          if (reminder.mode === 'schedule') {
+            const hasFiredToday = reminder.lastFiredDate === now.toDateString();
+            const isTargetDay = reminder.days.includes(currentDay);
+            const isTargetTime = reminder.time === timeString;
+
+            if (isTargetDay && isTargetTime && !hasFiredToday) {
+              triggerNotification(reminder);
+              updated = true;
+              return { ...reminder, lastFiredDate: now.toDateString() };
+            }
+          }
+          return reminder;
+        });
+        return updated ? newReminders : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [soundEnabled]);
+
+  const triggerNotification = (reminder) => {
+    if (Notification.permission === 'granted') {
+      // Use Service Worker registration to show notification if possible (helps mobile)
+      navigator.serviceWorker?.ready.then(registration => {
+        registration.showNotification('RemindMe App', {
+          body: reminder.text,
+          icon: '/icon.png',
+          vibrate: [200, 100, 200]
+        });
+      }).catch(() => {
+        // Fallback to standard web notification
+        new Notification('RemindMe App', { body: reminder.text, icon: '/icon.png' });
+      });
+    }
+    
+    if (soundEnabled) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        osc.type = 'square'; // More brutalist sound
+        osc.frequency.value = 600;
+        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+        osc.start();
+        setTimeout(() => osc.stop(), 200);
+      } catch (e) {
+        console.log("Audio play failed");
+      }
+    }
+  };
+
+  // --- Handlers ---
+  const toggleDay = (dayId) => {
+    setSelectedDays(prev => 
+      prev.includes(dayId) ? prev.filter(d => d !== dayId) : [...prev, dayId].sort()
+    );
+  };
+
+  const handleAddReminder = (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+
+    const newReminder = {
+      id: crypto.randomUUID(),
+      text,
+      mode,
+      active: true,
+      createdAt: Date.now()
+    };
+
+    if (mode === 'interval') {
+      const val = parseInt(intervalVal, 10);
+      if (isNaN(val) || val <= 0) return;
+      let multiplier = 1000;
+      if (unit === 'minutes') multiplier = 60 * 1000;
+      if (unit === 'hours') multiplier = 60 * 60 * 1000;
+      
+      newReminder.intervalVal = val;
+      newReminder.unit = unit;
+      newReminder.intervalMs = val * multiplier;
+      newReminder.nextRun = Date.now() + newReminder.intervalMs;
+    } else {
+      if (selectedDays.length === 0) return; // Must select at least one day
+      newReminder.time = scheduledTime;
+      newReminder.days = selectedDays;
+      newReminder.lastFiredDate = null;
+    }
+
+    setReminders([...reminders, newReminder]);
+    setText('');
+  };
+
+  const toggleReminder = (id) => {
+    setReminders(prev => prev.map(r => {
+      if (r.id === id) {
+        const newActive = !r.active;
+        // Reset next run if turning back on to prevent instant firing
+        const updates = { active: newActive };
+        if (newActive && r.mode === 'interval') {
+          updates.nextRun = Date.now() + r.intervalMs;
+        }
+        return { ...r, ...updates };
+      }
+      return r;
+    }));
+  };
+
+  const deleteReminder = (id) => {
+    setReminders(prev => prev.filter(r => r.id !== id));
+  };
+
+  // --- Unified Dark Neo-Brutalist Glass Theme ---
+  const styles = {
+    app: "min-h-screen bg-[#0a0a0a] text-white font-mono selection:bg-white selection:text-black relative overflow-hidden",
+    backgroundGlow: "absolute top-[-20%] left-[-10%] w-[50vw] h-[50vw] bg-white/5 blur-[120px] rounded-full pointer-events-none",
+    container: "max-w-3xl mx-auto p-6 pt-12 relative z-10",
+    header: "flex justify-between items-center mb-10 border-b-4 border-white/20 pb-6",
+    title: "text-4xl md:text-5xl font-black uppercase tracking-tighter drop-shadow-[4px_4px_0_rgba(255,255,255,0.2)]",
+    card: "bg-white/5 backdrop-blur-xl border-4 border-white shadow-[8px_8px_0px_#ffffff] rounded-none p-6 mb-8 transition-all hover:shadow-[12px_12px_0px_#ffffff]",
+    input: "w-full border-4 border-white p-4 bg-transparent focus:outline-none focus:bg-white/10 transition-colors rounded-none font-bold placeholder-white/40 text-lg",
+    select: "border-4 border-white p-4 bg-transparent focus:outline-none focus:bg-white/10 rounded-none font-bold [&>option]:text-black",
+    buttonPrimary: "bg-white text-black border-4 border-white p-4 font-black uppercase flex items-center justify-center gap-2 hover:-translate-y-1 shadow-[4px_4px_0px_rgba(255,255,255,0.4)] hover:shadow-[8px_8px_0px_rgba(255,255,255,0.6)] active:translate-y-1 active:shadow-none transition-all",
+    buttonIcon: "p-3 bg-transparent border-4 border-white hover:bg-white hover:text-black shadow-[4px_4px_0px_rgba(255,255,255,1)] active:translate-y-1 active:shadow-none transition-all",
+    reminderCard: "flex flex-col sm:flex-row sm:items-center justify-between p-5 mb-6 bg-white/10 backdrop-blur-md border-4 border-white shadow-[6px_6px_0px_#ffffff] rounded-none transition-all",
+    reminderInactive: "opacity-50 grayscale shadow-[2px_2px_0px_#ffffff]",
+    badge: "bg-black border-2 border-white px-3 py-1 text-xs font-bold uppercase tracking-wider",
+    dayBtn: "w-10 h-10 flex items-center justify-center border-2 border-white font-bold cursor-pointer transition-all",
+    dayBtnActive: "bg-white text-black shadow-[2px_2px_0px_#ffffff]",
+    dayBtnInactive: "bg-transparent text-white/50 hover:bg-white/20"
+  };
+
+  return (
+    <div className={styles.app}>
+      <div className={styles.backgroundGlow}></div>
+      <div className={styles.container}>
+        
+        {/* Header */}
+        <header className={styles.header}>
+          <div className="flex items-center gap-4">
+            <div className="p-2 bg-white text-black border-2 border-white shadow-[4px_4px_0px_rgba(255,255,255,0.5)]">
+              <Bell size={32} />
+            </div>
+            <h1 className={styles.title}>RemindMe</h1>
+          </div>
+          <div className="flex gap-4">
+            {installPrompt && (
+               <button onClick={handleInstallClick} className={styles.buttonIcon} title="Install App">
+                 <Download size={24} />
+               </button>
+            )}
+            <button onClick={() => setShowSettings(!showSettings)} className={styles.buttonIcon}>
+              <Settings size={24} />
+            </button>
+          </div>
+        </header>
+
+        {/* Permissions Banner */}
+        {notificationPermission !== 'granted' && (
+          <div className="p-4 mb-8 flex items-center justify-between bg-black border-4 border-white shadow-[6px_6px_0px_#ffffff]">
+            <div className="flex items-center gap-3">
+              <AlertTriangle size={24} className="text-white" />
+              <div>
+                <h3 className="font-bold uppercase tracking-wide">Notifications Disabled</h3>
+                <p className="text-sm text-white/70">Enable for background alerts.</p>
+              </div>
+            </div>
+            <button 
+              onClick={requestNotificationPermission}
+              className="bg-white text-black px-4 py-2 font-bold uppercase hover:bg-gray-200 border-2 border-black"
+            >
+              Enable
+            </button>
+          </div>
+        )}
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <div className={styles.card}>
+            <h2 className="text-2xl mb-6 font-black uppercase border-b-2 border-white/20 pb-2">App Settings</h2>
+            <div className="flex items-center justify-between bg-white/5 p-4 border-2 border-white">
+              <div className="flex items-center gap-3">
+                {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}
+                <span className="font-bold uppercase tracking-wide">Audio Alerts</span>
+              </div>
+              <button 
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className={`w-16 h-8 flex items-center p-1 cursor-pointer border-2 border-white ${soundEnabled ? 'bg-white/20' : 'bg-transparent'}`}
+              >
+                <div className={`h-full w-1/2 bg-white transition-transform ${soundEnabled ? 'translate-x-full' : ''}`}></div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Add Reminder Form */}
+        <form onSubmit={handleAddReminder} className={styles.card}>
+          <input
+            type="text"
+            placeholder="What needs to be done?"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className={`${styles.input} mb-6`}
+            required
+          />
+          
+          <div className="flex gap-4 mb-6 border-b-2 border-white/20 pb-6">
+            <button
+              type="button"
+              onClick={() => setMode('interval')}
+              className={`flex-1 p-3 font-bold uppercase border-4 border-white transition-all ${mode === 'interval' ? 'bg-white text-black shadow-[4px_4px_0px_rgba(255,255,255,0.5)]' : 'bg-transparent text-white/50 hover:text-white'}`}
+            >
+              Interval
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('schedule')}
+              className={`flex-1 p-3 font-bold uppercase border-4 border-white transition-all ${mode === 'schedule' ? 'bg-white text-black shadow-[4px_4px_0px_rgba(255,255,255,0.5)]' : 'bg-transparent text-white/50 hover:text-white'}`}
+            >
+              Scheduled
+            </button>
+          </div>
+
+          <div className="min-h-[100px] mb-6">
+            {mode === 'interval' ? (
+              <div className="flex flex-col sm:flex-row gap-4 items-end animate-in fade-in slide-in-from-left-4 duration-300">
+                <div className="w-full sm:w-1/2">
+                  <label className="block mb-2 text-sm font-bold uppercase text-white/70">Repeat Every</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={intervalVal}
+                    onChange={(e) => setIntervalVal(e.target.value)}
+                    className={styles.input}
+                    required
+                  />
+                </div>
+                <div className="w-full sm:w-1/2">
+                  <select 
+                    value={unit} 
+                    onChange={(e) => setUnit(e.target.value)}
+                    className={`${styles.select} w-full h-[64px]`}
+                  >
+                    <option value="seconds">Seconds (Testing)</option>
+                    <option value="minutes">Minutes</option>
+                    <option value="hours">Hours</option>
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                <div>
+                  <label className="block mb-2 text-sm font-bold uppercase text-white/70">Active Days</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {DAYS.map(day => (
+                      <button
+                        key={`day-${day.id}`}
+                        type="button"
+                        onClick={() => toggleDay(day.id)}
+                        className={`${styles.dayBtn} ${selectedDays.includes(day.id) ? styles.dayBtnActive : styles.dayBtnInactive}`}
+                      >
+                        {day.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                   <label className="block mb-2 text-sm font-bold uppercase text-white/70">Time of Day</label>
+                   <input 
+                      type="time" 
+                      value={scheduledTime}
+                      onChange={(e) => setScheduledTime(e.target.value)}
+                      className={`${styles.input} [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert`}
+                      required 
+                    />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button type="submit" className={`${styles.buttonPrimary} w-full`}>
+            <Plus size={24} /> Create Routine
+          </button>
+        </form>
+
+        {/* Active Reminders List */}
+        <div>
+          <h2 className="text-3xl mb-8 font-black uppercase tracking-tight flex items-center gap-3 border-b-4 border-white/20 pb-4">
+            <Clock size={28} /> Active Routines
+          </h2>
+          
+          {reminders.length === 0 ? (
+            <div className="text-center py-16 border-4 border-dashed border-white/30 text-white/50 font-bold uppercase tracking-widest text-lg">
+              Void. Empty. Create a routine.
+            </div>
+          ) : (
+            reminders.map(reminder => (
+              <div 
+                key={reminder.id} 
+                className={`${styles.reminderCard} ${!reminder.active ? styles.reminderInactive : ''}`}
+              >
+                <div className="flex-grow mb-4 sm:mb-0">
+                  <h3 className="text-xl font-black tracking-wide mb-3">{reminder.text}</h3>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {reminder.mode === 'interval' ? (
+                      <span className={styles.badge}>
+                        Every {reminder.intervalVal} {reminder.unit}
+                      </span>
+                    ) : (
+                      <>
+                        <span className={styles.badge}>
+                          <Calendar size={12} className="inline mr-1 mb-0.5" />
+                          {reminder.days.length === 7 ? 'Everyday' : `${reminder.days.length} Days`} @ {reminder.time}
+                        </span>
+                      </>
+                    )}
+
+                    {reminder.active && reminder.mode === 'interval' && (
+                      <span className="text-xs font-bold text-white/60">
+                        Next: {new Date(reminder.nextRun).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex gap-3 sm:ml-6 shrink-0">
+                  <button 
+                    onClick={() => toggleReminder(reminder.id)}
+                    className={`p-3 border-4 border-white transition-all shadow-[4px_4px_0px_rgba(255,255,255,0.3)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_rgba(255,255,255,0.5)] active:translate-y-1 active:shadow-none ${reminder.active ? 'bg-white/10' : 'bg-white text-black'}`}
+                  >
+                    {reminder.active ? <Square size={20} /> : <Play size={20} />}
+                  </button>
+                  <button 
+                    onClick={() => deleteReminder(reminder.id)}
+                    className="p-3 bg-red-600 border-4 border-white text-white hover:bg-red-500 shadow-[4px_4px_0px_rgba(255,255,255,0.3)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_rgba(255,255,255,0.5)] active:translate-y-1 active:shadow-none transition-all"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        
+      </div>
+    </div>
+  );
+}
