@@ -53,6 +53,21 @@
                         });
                     }
                 });
+
+                // NEW: Listen for actual Web Push events from Vercel!
+                self.addEventListener('push', (event) => {
+                    let data = { title: 'Reminder!', body: 'Time to do your task!' };
+                    if (event.data) {
+                        data = event.data.json();
+                    }
+                    event.waitUntil(
+                        self.registration.showNotification(data.title, {
+                            body: data.body,
+                            icon: 'icon.png',
+                            vibrate: [200, 100, 200]
+                        })
+                    );
+                });
             `;
             const swBlob = new Blob([swLogic], { type: 'application/javascript' });
             const swUrl = URL.createObjectURL(swBlob);
@@ -101,33 +116,57 @@
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #000; border: 2px solid white; }
+
+        /* New category tag styles */
+        .cat-school { background-color: #93c5fd; }
+        .cat-chores { background-color: #fca5a5; }
+        .cat-health { background-color: #86efac; }
+        .cat-fun { background-color: #d8b4fe; }
     </style>
 </head>
-<body class="text-black font-sans min-h-screen flex flex-col items-center py-8 px-4">
+<body class="text-black font-sans h-screen w-screen overflow-hidden flex flex-col bg-[#f0fdf4]">
 
-    <!-- Main Container -->
-    <div class="w-full max-w-lg glass-brutal rounded-2xl overflow-hidden flex flex-col">
-        <!-- Header -->
-        <div class="bg-[#a7f3d0] p-6 border-b-4 border-black text-center relative overflow-hidden">
-            <h1 class="text-4xl font-black tracking-tighter uppercase relative z-10 text-black">RemindMe</h1>
-            <p class="font-bold text-sm mt-2 relative z-10 border-2 border-black inline-block px-3 py-1 bg-white">
-                STAY ON TRACK
+    <!-- Header -->
+    <div class="bg-[#a7f3d0] p-4 md:p-6 border-b-4 border-black flex justify-between items-center shrink-0">
+        <div>
+            <h1 class="text-2xl md:text-4xl font-black tracking-tighter uppercase text-black">RemindMe</h1>
+            <p class="font-bold text-xs md:text-sm mt-1 border-2 border-black inline-block px-2 bg-white">
+                FULL SCREEN PRO
             </p>
         </div>
+        <button id="offline-sync-btn" class="bg-[#fde047] p-2 md:px-4 md:py-2 border-3 border-black font-black text-sm md:text-base btn-brutal flex items-center gap-2">
+            <i data-lucide="smartphone" class="w-5 h-5"></i>
+            <span class="hidden md:inline">Offline Sync</span>
+        </button>
+    </div>
 
+    <!-- Main Workspace -->
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden">
+        
         <!-- Input Section -->
-        <div class="p-6 border-b-4 border-black bg-white/60">
-            <div class="space-y-5">
+        <div class="w-full md:w-1/3 lg:w-1/4 p-4 md:p-6 border-b-4 md:border-b-0 md:border-r-4 border-black bg-white/60 overflow-y-auto shrink-0 flex flex-col">
+            <h2 class="font-black uppercase mb-4 text-xl border-b-4 border-black pb-2 inline-block">New Reminder</h2>
+            <div class="space-y-4 flex-1">
                 <div>
-                    <label class="block text-sm font-black uppercase mb-1">Task / Event</label>
-                    <input type="text" id="task-text" placeholder="Drink water, take a walk..." 
+                    <label class="block text-sm font-black uppercase mb-1">Task</label>
+                    <input type="text" id="task-text" placeholder="Read book, Take out trash..." 
                         class="w-full px-4 py-3 border-3 border-black rounded-none focus:outline-none focus:ring-4 focus:ring-green-300 bg-white shadow-[4px_4px_0px_rgba(0,0,0,0.1)] font-bold">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-black uppercase mb-1">Category</label>
+                    <select id="task-category" class="w-full px-4 py-3 border-3 border-black rounded-none focus:outline-none focus:ring-4 focus:ring-green-300 bg-white font-bold cursor-pointer">
+                        <option value="school">School / Study</option>
+                        <option value="chores">Chores</option>
+                        <option value="health">Health</option>
+                        <option value="fun">Fun / Free Time</option>
+                    </select>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-sm font-black uppercase mb-1">Type</label>
-                        <select id="task-type" class="w-full px-4 py-3 border-3 border-black rounded-none focus:outline-none focus:ring-4 focus:ring-green-300 bg-white font-bold cursor-pointer">
+                        <label class="block text-sm font-black uppercase mb-1">Schedule</label>
+                        <select id="task-type" class="w-full px-3 py-3 border-3 border-black rounded-none focus:outline-none focus:ring-4 focus:ring-green-300 bg-white font-bold cursor-pointer">
                             <option value="once">Once</option>
                             <option value="daily">Daily</option>
                             <option value="interval">Interval</option>
@@ -135,50 +174,72 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-black uppercase mb-1">Start Time</label>
+                        <label class="block text-sm font-black uppercase mb-1">Time</label>
                         <input type="time" id="task-time" 
-                            class="w-full px-4 py-3 border-3 border-black rounded-none focus:outline-none focus:ring-4 focus:ring-green-300 bg-white font-bold">
+                            class="w-full px-3 py-3 border-3 border-black rounded-none focus:outline-none focus:ring-4 focus:ring-green-300 bg-white font-bold">
                     </div>
                 </div>
 
-                <!-- Interval Settings (Hidden by default) -->
+                <!-- Interval Settings -->
                 <div id="interval-settings" class="hidden">
                     <label class="block text-sm font-black uppercase mb-1">Every (Minutes)</label>
-                    <input type="number" id="task-interval" placeholder="e.g., 60 for 1 hour" min="1"
+                    <input type="number" id="task-interval" placeholder="60" min="1"
                         class="w-full px-4 py-3 border-3 border-black rounded-none focus:outline-none bg-white font-bold">
                 </div>
 
-                <!-- Specific Days Settings (Hidden by default) -->
+                <!-- Specific Days Settings -->
                 <div id="days-settings" class="hidden">
-                    <label class="block text-sm font-black uppercase mb-1">Select Days</label>
+                    <label class="block text-sm font-black uppercase mb-1">Days</label>
                     <div class="flex justify-between gap-1">
-                        <button type="button" class="day-btn flex-1 py-2 border-2 border-black bg-white font-bold transition-colors" data-day="0">Su</button>
-                        <button type="button" class="day-btn flex-1 py-2 border-2 border-black bg-white font-bold transition-colors" data-day="1">Mo</button>
-                        <button type="button" class="day-btn flex-1 py-2 border-2 border-black bg-white font-bold transition-colors" data-day="2">Tu</button>
-                        <button type="button" class="day-btn flex-1 py-2 border-2 border-black bg-white font-bold transition-colors" data-day="3">We</button>
-                        <button type="button" class="day-btn flex-1 py-2 border-2 border-black bg-white font-bold transition-colors" data-day="4">Th</button>
-                        <button type="button" class="day-btn flex-1 py-2 border-2 border-black bg-white font-bold transition-colors" data-day="5">Fr</button>
-                        <button type="button" class="day-btn flex-1 py-2 border-2 border-black bg-white font-bold transition-colors" data-day="6">Sa</button>
+                        <button type="button" class="day-btn flex-1 py-1 border-2 border-black bg-white font-bold text-sm" data-day="0">Su</button>
+                        <button type="button" class="day-btn flex-1 py-1 border-2 border-black bg-white font-bold text-sm" data-day="1">Mo</button>
+                        <button type="button" class="day-btn flex-1 py-1 border-2 border-black bg-white font-bold text-sm" data-day="2">Tu</button>
+                        <button type="button" class="day-btn flex-1 py-1 border-2 border-black bg-white font-bold text-sm" data-day="3">We</button>
+                        <button type="button" class="day-btn flex-1 py-1 border-2 border-black bg-white font-bold text-sm" data-day="4">Th</button>
+                        <button type="button" class="day-btn flex-1 py-1 border-2 border-black bg-white font-bold text-sm" data-day="5">Fr</button>
+                        <button type="button" class="day-btn flex-1 py-1 border-2 border-black bg-white font-bold text-sm" data-day="6">Sa</button>
                     </div>
                 </div>
 
-                <button id="add-btn" class="w-full bg-[#fde047] text-black font-black py-4 px-4 text-lg btn-brutal flex items-center justify-center gap-2 uppercase tracking-wide">
-                    <i data-lucide="plus" class="w-6 h-6 stroke-[3]"></i> Add Reminder
-                </button>
+                <div class="flex items-center gap-2 mt-2">
+                    <input type="checkbox" id="task-priority" class="w-5 h-5 border-3 border-black rounded-none accent-black">
+                    <label for="task-priority" class="text-sm font-black uppercase">High Priority</label>
+                </div>
             </div>
-            
-            <div id="permission-warning" class="hidden mt-4 text-xs font-bold bg-red-200 p-3 border-2 border-black flex items-start gap-2 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                <i data-lucide="alert-triangle" class="w-4 h-4 shrink-0"></i>
-                <span>Notifications are blocked. Please enable them in your browser settings.</span>
-            </div>
+
+            <button id="add-btn" class="w-full bg-[#fde047] text-black font-black py-4 px-4 mt-6 text-lg btn-brutal flex items-center justify-center gap-2 uppercase tracking-wide">
+                <i data-lucide="plus" class="w-6 h-6 stroke-[3]"></i> Add
+            </button>
         </div>
 
         <!-- Reminders List -->
-        <div class="p-6 bg-white/40 max-h-[45vh] overflow-y-auto">
-            <h2 class="text-xl font-black uppercase tracking-wider mb-4 border-b-4 border-black pb-2">Active Reminders</h2>
-            <div id="reminder-list" class="space-y-4">
+        <div class="flex-1 p-4 md:p-6 bg-white/40 overflow-y-auto">
+            <h2 class="text-2xl font-black uppercase tracking-wider mb-6 border-b-4 border-black pb-2 inline-block">Active Reminders</h2>
+            <div id="reminder-list" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                 <!-- Items injected here -->
             </div>
+        </div>
+    </main>
+
+    <!-- Offline Sync Modal -->
+    <div id="sync-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white border-4 border-black p-6 w-full max-w-md shadow-[8px_8px_0px_rgba(0,0,0,1)] flex flex-col items-center text-center">
+            <h2 class="text-2xl font-black uppercase mb-2">Vercel Web Push</h2>
+            <p class="font-bold text-sm text-gray-700 mb-4">
+                Connect this browser to your Vercel Backend using VAPID keys.
+            </p>
+            
+            <button id="subscribe-push-btn" class="w-full bg-[#86efac] text-black font-black py-3 border-3 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-y-1 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all mb-4 uppercase">
+                1. Subscribe Browser
+            </button>
+            
+            <button id="test-push-btn" class="w-full bg-[#93c5fd] text-black font-black py-3 border-3 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-y-1 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all mb-6 uppercase">
+                2. Test Vercel Push
+            </button>
+
+            <button id="close-modal-btn" class="w-full bg-[#fca5a5] text-black font-black py-3 btn-brutal uppercase">
+                Close
+            </button>
         </div>
     </div>
 
@@ -189,26 +250,92 @@
             let reminders = JSON.parse(localStorage.getItem('reminders_neo')) || [];
             let selectedDays = [];
             
+            // --- GENERATE SYNC TOPIC ---
+            let ntfyTopic = localStorage.getItem('ntfy_topic');
+            if (!ntfyTopic) {
+                ntfyTopic = 'rmd-' + Math.random().toString(36).substring(2, 10) + '-' + Math.random().toString(36).substring(2, 6);
+                localStorage.setItem('ntfy_topic', ntfyTopic);
+            }
+            
+            // UI Elements
             const taskText = document.getElementById('task-text');
             const taskTime = document.getElementById('task-time');
             const taskType = document.getElementById('task-type');
+            const taskCategory = document.getElementById('task-category');
+            const taskPriority = document.getElementById('task-priority');
             const taskInterval = document.getElementById('task-interval');
             const intervalSettings = document.getElementById('interval-settings');
             const daysSettings = document.getElementById('days-settings');
             const addBtn = document.getElementById('add-btn');
             const reminderList = document.getElementById('reminder-list');
             const dayBtns = document.querySelectorAll('.day-btn');
+            const syncModal = document.getElementById('sync-modal');
+
+            // --- VERCEL VAPID SETUP ---
+            // Replace this with your PUBLIC VAPID KEY once you generate it!
+            const PUBLIC_VAPID_KEY = 'YOUR_PUBLIC_VAPID_KEY_HERE'; 
+            let pushSubscription = JSON.parse(localStorage.getItem('push_sub')) || null;
+
+            // Helper to convert VAPID key format
+            function urlBase64ToUint8Array(base64String) {
+                const padding = '='.repeat((4 - base64String.length % 4) % 4);
+                const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                const rawData = window.atob(base64);
+                const outputArray = new Uint8Array(rawData.length);
+                for (let i = 0; i < rawData.length; ++i) {
+                    outputArray[i] = rawData.charCodeAt(i);
+                }
+                return outputArray;
+            }
+
+            document.getElementById('subscribe-push-btn').addEventListener('click', async () => {
+                if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                    alert('Web Push is not supported in this browser.');
+                    return;
+                }
+                try {
+                    const registration = await navigator.serviceWorker.ready;
+                    const subscription = await registration.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
+                    });
+                    pushSubscription = subscription;
+                    localStorage.setItem('push_sub', JSON.stringify(subscription));
+                    alert('Successfully subscribed to Web Push!');
+                } catch (err) {
+                    console.error('Failed to subscribe:', err);
+                    alert('Failed to subscribe. Did you replace the PUBLIC_VAPID_KEY in the code?');
+                }
+            });
+
+            document.getElementById('test-push-btn').addEventListener('click', async () => {
+                if (!pushSubscription) {
+                    alert('Please click Subscribe first!');
+                    return;
+                }
+                try {
+                    await fetch('/api/send-push', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            subscription: pushSubscription,
+                            payload: { title: 'Vercel Alert!', body: 'Your VAPID Backend is working!' }
+                        })
+                    });
+                } catch (err) {
+                    console.error('Push failed', err);
+                }
+            });
 
             // --- UI TOGGLES ---
+            document.getElementById('offline-sync-btn').addEventListener('click', () => syncModal.classList.remove('hidden'));
+            document.getElementById('close-modal-btn').addEventListener('click', () => syncModal.classList.add('hidden'));
+
             taskType.addEventListener('change', (e) => {
                 intervalSettings.classList.add('hidden');
                 daysSettings.classList.add('hidden');
-                
-                if (e.target.value === 'interval') {
-                    intervalSettings.classList.remove('hidden');
-                } else if (e.target.value === 'days') {
-                    daysSettings.classList.remove('hidden');
-                }
+                if (e.target.value === 'interval') intervalSettings.classList.remove('hidden');
+                if (e.target.value === 'days') daysSettings.classList.remove('hidden');
             });
 
             dayBtns.forEach(btn => {
@@ -226,29 +353,19 @@
                 });
             });
 
-            // --- NOTIFICATIONS ---
+            // --- NOTIFICATIONS & CLOUD SYNC ---
             function checkPermissions() {
-                if ("Notification" in window) {
-                    if (Notification.permission === "default") {
-                        Notification.requestPermission();
-                    } else if (Notification.permission === "denied") {
-                        document.getElementById('permission-warning').classList.remove('hidden');
-                    }
+                if ("Notification" in window && Notification.permission === "default") {
+                    Notification.requestPermission();
                 }
             }
             checkPermissions();
 
-            function triggerNotification(title, body) {
+            function triggerLocalNotification(title, body) {
                 if ("Notification" in window && Notification.permission === "granted") {
-                    // Try to use Service Worker for better background reliability
                     navigator.serviceWorker.ready.then(registration => {
-                        registration.active.postMessage({
-                            type: 'SHOW_NOTIFICATION',
-                            title: title,
-                            body: body
-                        });
+                        registration.active.postMessage({ type: 'SHOW_NOTIFICATION', title, body });
                     }).catch(() => {
-                        // Fallback to standard web notification
                         new Notification(title, { body: body, icon: 'icon.png' });
                     });
                 }
@@ -266,7 +383,6 @@
                 
                 if (!isTriggeredNow) {
                     target.setHours(hours, minutes, 0, 0);
-                    // If the time already passed today, start from tomorrow for 'once' or 'daily'
                     if (target.getTime() <= now.getTime() && (type === 'once' || type === 'daily')) {
                         target.setDate(target.getDate() + 1);
                     }
@@ -287,13 +403,9 @@
 
                 if (type === 'days') {
                     target.setHours(hours, minutes, 0, 0);
-                    if (isTriggeredNow) {
-                        target.setDate(target.getDate() + 1);
-                    } else if (target.getTime() <= now.getTime()) {
+                    if (isTriggeredNow || target.getTime() <= now.getTime()) {
                         target.setDate(target.getDate() + 1);
                     }
-
-                    // Find the next available day
                     let safetyCounter = 0;
                     while (!specificDays.includes(target.getDay()) && safetyCounter < 8) {
                         target.setDate(target.getDate() + 1);
@@ -308,11 +420,10 @@
             function formatDisplayInfo(r) {
                 if (r.type === 'once') return `Once at ${r.timeStr}`;
                 if (r.type === 'daily') return `Daily at ${r.timeStr}`;
-                if (r.type === 'interval') return `Every ${r.interval} mins (Next: ${new Date(r.nextTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`;
+                if (r.type === 'interval') return `Every ${r.interval}m (Next: ${new Date(r.nextTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`;
                 if (r.type === 'days') {
                     const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-                    const daysStr = r.days.map(d => dayNames[d]).join(', ');
-                    return `${daysStr} at ${r.timeStr}`;
+                    return `${r.days.map(d => dayNames[d]).join(', ')} at ${r.timeStr}`;
                 }
             }
 
@@ -320,24 +431,37 @@
                 reminderList.innerHTML = '';
                 
                 if (reminders.length === 0) {
-                    reminderList.innerHTML = `<p class="font-bold text-gray-500 text-center py-4 border-2 border-dashed border-gray-400">NO ACTIVE REMINDERS</p>`;
+                    reminderList.innerHTML = `
+                        <div class="col-span-full font-bold text-gray-500 text-center py-12 border-4 border-dashed border-gray-400">
+                            <i data-lucide="check-circle" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                            NO ACTIVE REMINDERS. YOU ARE ALL CAUGHT UP!
+                        </div>`;
+                    lucide.createIcons();
                     return;
                 }
 
                 reminders.forEach(r => {
                     const item = document.createElement('div');
-                    item.className = `bg-white p-4 border-3 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] flex justify-between items-center`;
+                    const catColors = { school: 'cat-school', chores: 'cat-chores', health: 'cat-health', fun: 'cat-fun' };
+                    const bgClass = catColors[r.category] || 'bg-white';
+                    const priorityBorder = r.priority ? 'border-red-500 shadow-[6px_6px_0px_rgba(239,68,68,1)]' : 'border-black shadow-[6px_6px_0px_rgba(0,0,0,1)]';
+                    
+                    item.className = `${bgClass} p-4 border-4 ${priorityBorder} flex flex-col justify-between h-36 relative transition-transform hover:-translate-y-1`;
                     
                     item.innerHTML = `
-                        <div class="overflow-hidden pr-2">
-                            <h3 class="font-black text-lg truncate">${r.text}</h3>
-                            <p class="text-sm font-bold bg-[#fef08a] inline-block px-2 border border-black mt-1">
-                                ${formatDisplayInfo(r)}
-                            </p>
+                        ${r.priority ? '<div class="absolute -top-3 -right-3 bg-red-500 text-white border-2 border-black rounded-full w-8 h-8 flex items-center justify-center font-black animate-pulse">!</div>' : ''}
+                        <div>
+                            <div class="flex justify-between items-start mb-1">
+                                <h3 class="font-black text-xl leading-tight truncate pr-2">${r.text}</h3>
+                                <button onclick="deleteReminder('${r.id}')" class="bg-white p-1.5 border-2 border-black hover:bg-red-400 transition-colors shrink-0">
+                                    <i data-lucide="trash-2" class="w-4 h-4 font-black"></i>
+                                </button>
+                            </div>
+                            <span class="text-[10px] font-black uppercase bg-black text-white px-2 py-0.5 rounded-full">${r.category}</span>
                         </div>
-                        <button onclick="deleteReminder('${r.id}')" class="bg-red-400 p-2 border-2 border-black hover:translate-y-1 hover:translate-x-1 hover:shadow-none shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all shrink-0">
-                            <i data-lucide="x" class="w-5 h-5 font-black"></i>
-                        </button>
+                        <div class="mt-2 text-sm font-bold bg-white/80 inline-block px-2 py-1 border-2 border-black self-start">
+                            <i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${formatDisplayInfo(r)}
+                        </div>
                     `;
                     reminderList.appendChild(item);
                 });
@@ -355,6 +479,8 @@
                 const timeStr = taskTime.value;
                 const type = taskType.value;
                 const intervalMins = taskInterval.value;
+                const category = taskCategory.value;
+                const priority = taskPriority.checked;
 
                 if (!text || !timeStr || (type === 'interval' && !intervalMins) || (type === 'days' && selectedDays.length === 0)) {
                     addBtn.classList.add('bg-red-400');
@@ -364,16 +490,13 @@
 
                 const nextTime = getNextOccurrence(timeStr, type, intervalMins, selectedDays, false);
 
-                reminders.push({
+                const newReminder = {
                     id: crypto.randomUUID(),
-                    text,
-                    timeStr,
-                    type,
-                    interval: intervalMins,
-                    days: [...selectedDays],
-                    nextTime: nextTime
-                });
+                    text, timeStr, type, interval: intervalMins, category, priority,
+                    days: [...selectedDays], nextTime
+                };
 
+                reminders.push(newReminder);
                 save();
                 render();
                 checkPermissions();
@@ -381,22 +504,22 @@
                 // Reset forms
                 taskText.value = '';
                 taskTime.value = '';
+                taskPriority.checked = false;
             });
 
-            // --- BACKGROUND LOOP ---
+            // --- BACKGROUND LOOP (Local Tab Fallback & Maintenance) ---
             setInterval(() => {
                 const now = Date.now();
                 let changed = false;
 
                 reminders = reminders.filter(r => {
                     if (now >= r.nextTime) {
-                        triggerNotification("⏰ Reminder: " + r.text, "Time to get it done!");
+                        triggerLocalNotification(r.priority ? "🚨 PRIORITY: " + r.text : "⏰ Reminder: " + r.text, "Time to do it!");
                         
                         if (r.type === 'once') {
                             changed = true;
-                            return false; // Remove 'once' reminders
+                            return false; 
                         } else {
-                            // Calculate next occurrence for recurring tasks
                             r.nextTime = getNextOccurrence(r.timeStr, r.type, r.interval, r.days, true);
                             changed = true;
                             return true;
@@ -409,8 +532,9 @@
                     save();
                     render();
                 }
-            }, 5000); // Check every 5 seconds to be efficient
+            }, 5000);
 
+            // Initial load
             render();
         });
     </script>
