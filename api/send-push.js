@@ -1,14 +1,14 @@
 const webpush = require('web-push');
 
-// Vercel will inject these securely from your project settings
-const privateVapidKey = process.env.PRIVATE_VAPID_KEY;
+// Since this is a personal project, we can place the keys directly here!
+const publicKey = "BN8LnqbjlXVLn7_mdUIeqHFInouivg-AeckS7pAZPFqyV99vUtoD0fjUTWI6O7EUvkAbK4FGL9znJ1eyXrHmPjk";
+const privateKey = "t--96WWeP-1PHDhcrcemXuqs1NsuONov8RlbaLG4txU";
 
-// You MUST set your email and your VAPID keys here to use web push
-// The email is required by push services (like Google/Apple) to contact you if there is an issue
+// The email is required by push services to contact you if there is an issue
 webpush.setVapidDetails(
-  'mailto:your-email@example.com', // <-- Replace with your email!
-  process.env.NEXT_PUBLIC_VAPID_KEY,
-  privateVapidKey
+  'mailto:035665@mtka.org', 
+  publicKey,
+  privateKey
 );
 
 export default async function handler(req, res) {
