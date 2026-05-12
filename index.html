@@ -1,455 +1,376 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Plus, Trash2, Settings, Play, Square, AlertTriangle, Volume2, VolumeX, Calendar, Clock, Download } from 'lucide-react';
+import { 
+  Bell, 
+  Settings, 
+  Plus, 
+  Trash2, 
+  Pause, 
+  Play, 
+  Volume2, 
+  VolumeX, 
+  AlertTriangle,
+  Clock
+} from 'lucide-react';
 
 export default function App() {
-  // --- State ---
-  const [reminders, setReminders] = useState([]);
-  const [text, setText] = useState('');
-  
-  // Advanced Settings State
-  const [mode, setMode] = useState('interval'); // 'interval' or 'schedule'
-  const [intervalVal, setIntervalVal] = useState('15');
-  const [unit, setUnit] = useState('minutes');
-  const [scheduledTime, setScheduledTime] = useState('09:00');
-  const [selectedDays, setSelectedDays] = useState([1, 2, 3, 4, 5]); // 0=Sun, 1=Mon...
-  
+  // State Management
+  const [reminders, setReminders] = useState(() => {
+    const saved = localStorage.getItem('glassBrutalistReminders');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [permission, setPermission] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  );
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [notificationPermission, setNotificationPermission] = useState('default');
-  const [showSettings, setShowSettings] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState(null);
 
-  const DAYS = [
-    { id: 1, label: 'M' }, { id: 2, label: 'T' }, { id: 3, label: 'W' },
-    { id: 4, label: 'T' }, { id: 5, label: 'F' }, { id: 6, label: 'S' }, { id: 0, label: 'S' }
-  ];
+  // Form State
+  const [taskName, setTaskName] = useState('');
+  const [intervalValue, setIntervalValue] = useState('30');
+  const [intervalUnit, setIntervalUnit] = useState('minutes');
 
-  // --- Initialization, PWA & Permissions ---
-  useEffect(() => {
-    // Check Notification Permission
-    if ('Notification' in window) {
-      setNotificationPermission(Notification.permission);
-    }
-
-    // Load saved reminders
-    const saved = localStorage.getItem('neoGlassReminders');
-    if (saved) setReminders(JSON.parse(saved));
-
-    // Dynamic PWA Manifest Injection (Looks for /icon.png in your public folder)
-    const manifest = {
-      name: "RemindMe Neo",
-      short_name: "RemindMe",
-      start_url: "/",
-      display: "standalone",
-      background_color: "#0f0f0f",
-      theme_color: "#ffffff",
-      icons: [{ src: "/icon.png", sizes: "192x192", type: "image/png" }]
-    };
-    const stringManifest = JSON.stringify(manifest);
-    const blob = new Blob([stringManifest], {type: 'application/json'});
-    const manifestURL = URL.createObjectURL(blob);
-    
-    let link = document.querySelector('link[rel="manifest"]');
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'manifest';
-      document.head.appendChild(link);
-    }
-    link.href = manifestURL;
-
-    // Handle Install Prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      setInstallPrompt(e);
-    });
-  }, []);
+  // Audio Ref for notification sound
+  const audioRef = useRef(null);
 
   // Save to local storage whenever reminders change
   useEffect(() => {
-    localStorage.setItem('neoGlassReminders', JSON.stringify(reminders));
+    localStorage.setItem('glassBrutalistReminders', JSON.stringify(reminders));
   }, [reminders]);
 
-  const requestNotificationPermission = async () => {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
-      setNotificationPermission(permission);
+  // Request Notification Permission
+  const requestPermission = async () => {
+    if (!('Notification' in window)) {
+      alert('This browser does not support desktop notification');
+      return;
     }
+    const perm = await Notification.requestPermission();
+    setPermission(perm);
   };
 
-  const handleInstallClick = async () => {
-    if (!installPrompt) return;
-    installPrompt.prompt();
-    const { outcome } = await installPrompt.userChoice;
-    if (outcome === 'accepted') setInstallPrompt(null);
-  };
-
-  // --- Core Timer Logic ---
+  // Main Timer Loop
   useEffect(() => {
     const timer = setInterval(() => {
-      const now = new Date();
-      const currentMs = now.getTime();
-      const currentDay = now.getDay();
-      const currentHours = now.getHours().toString().padStart(2, '0');
-      const currentMinutes = now.getMinutes().toString().padStart(2, '0');
-      const timeString = `${currentHours}:${currentMinutes}`;
+      const now = Date.now();
       
-      setReminders(prev => {
+      setReminders(prevReminders => {
         let updated = false;
-        const newReminders = prev.map(reminder => {
-          if (!reminder.active) return reminder;
-
-          // Interval Logic
-          if (reminder.mode === 'interval' && currentMs >= reminder.nextRun) {
-            triggerNotification(reminder);
+        const newReminders = prevReminders.map(reminder => {
+          if (reminder.active && now >= reminder.nextTrigger) {
             updated = true;
-            return { ...reminder, nextRun: currentMs + reminder.intervalMs };
-          }
-          
-          // Schedule Logic (Daily at specific time)
-          if (reminder.mode === 'schedule') {
-            const hasFiredToday = reminder.lastFiredDate === now.toDateString();
-            const isTargetDay = reminder.days.includes(currentDay);
-            const isTargetTime = reminder.time === timeString;
-
-            if (isTargetDay && isTargetTime && !hasFiredToday) {
-              triggerNotification(reminder);
-              updated = true;
-              return { ...reminder, lastFiredDate: now.toDateString() };
-            }
+            triggerNotification(reminder.text);
+            
+            // Calculate next trigger
+            return {
+              ...reminder,
+              nextTrigger: now + reminder.intervalMs,
+              lastTriggered: now
+            };
           }
           return reminder;
         });
-        return updated ? newReminders : prev;
+
+        return updated ? newReminders : prevReminders;
       });
-    }, 1000);
+    }, 1000); // Check every second
 
     return () => clearInterval(timer);
-  }, [soundEnabled]);
+  }, [soundEnabled, permission]); // Re-bind if settings change
 
-  const triggerNotification = (reminder) => {
-    if (Notification.permission === 'granted') {
-      // Use Service Worker registration to show notification if possible (helps mobile)
-      navigator.serviceWorker?.ready.then(registration => {
-        registration.showNotification('RemindMe App', {
-          body: reminder.text,
-          icon: '/icon.png',
-          vibrate: [200, 100, 200]
-        });
-      }).catch(() => {
-        // Fallback to standard web notification
-        new Notification('RemindMe App', { body: reminder.text, icon: '/icon.png' });
+  const triggerNotification = (text) => {
+    // Play Sound
+    if (soundEnabled && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(e => console.log('Audio play failed:', e));
+    }
+
+    // Show Notification
+    if (permission === 'granted') {
+      new Notification('Reminder!', {
+        body: text,
+        icon: 'https://cdn-icons-png.flaticon.com/512/1827/1827370.png' // Generic bell icon
       });
     }
-    
-    if (soundEnabled) {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-        osc.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        osc.type = 'square'; // More brutalist sound
-        osc.frequency.value = 600;
-        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-        osc.start();
-        setTimeout(() => osc.stop(), 200);
-      } catch (e) {
-        console.log("Audio play failed");
-      }
-    }
   };
 
-  // --- Handlers ---
-  const toggleDay = (dayId) => {
-    setSelectedDays(prev => 
-      prev.includes(dayId) ? prev.filter(d => d !== dayId) : [...prev, dayId].sort()
-    );
-  };
-
-  const handleAddReminder = (e) => {
+  // Add a new reminder
+  const addReminder = (e) => {
     e.preventDefault();
-    if (!text.trim()) return;
+    if (!taskName.trim() || !intervalValue || isNaN(intervalValue)) return;
+
+    let multiplier = 1000; // base is seconds for testing flexibility
+    if (intervalUnit === 'seconds') multiplier = 1000;
+    if (intervalUnit === 'minutes') multiplier = 1000 * 60;
+    if (intervalUnit === 'hours') multiplier = 1000 * 60 * 60;
+
+    const intervalMs = parseInt(intervalValue) * multiplier;
 
     const newReminder = {
       id: crypto.randomUUID(),
-      text,
-      mode,
+      text: taskName,
+      intervalMs: intervalMs,
+      nextTrigger: Date.now() + intervalMs,
       active: true,
       createdAt: Date.now()
     };
 
-    if (mode === 'interval') {
-      const val = parseInt(intervalVal, 10);
-      if (isNaN(val) || val <= 0) return;
-      let multiplier = 1000;
-      if (unit === 'minutes') multiplier = 60 * 1000;
-      if (unit === 'hours') multiplier = 60 * 60 * 1000;
-      
-      newReminder.intervalVal = val;
-      newReminder.unit = unit;
-      newReminder.intervalMs = val * multiplier;
-      newReminder.nextRun = Date.now() + newReminder.intervalMs;
-    } else {
-      if (selectedDays.length === 0) return; // Must select at least one day
-      newReminder.time = scheduledTime;
-      newReminder.days = selectedDays;
-      newReminder.lastFiredDate = null;
-    }
-
     setReminders([...reminders, newReminder]);
-    setText('');
+    setTaskName('');
   };
 
   const toggleReminder = (id) => {
-    setReminders(prev => prev.map(r => {
+    setReminders(reminders.map(r => {
       if (r.id === id) {
-        const newActive = !r.active;
-        // Reset next run if turning back on to prevent instant firing
-        const updates = { active: newActive };
-        if (newActive && r.mode === 'interval') {
-          updates.nextRun = Date.now() + r.intervalMs;
-        }
-        return { ...r, ...updates };
+        const isActivating = !r.active;
+        return {
+          ...r,
+          active: isActivating,
+          // Reset timer if re-activating
+          nextTrigger: isActivating ? Date.now() + r.intervalMs : r.nextTrigger 
+        };
       }
       return r;
     }));
   };
 
   const deleteReminder = (id) => {
-    setReminders(prev => prev.filter(r => r.id !== id));
+    setReminders(reminders.filter(r => r.id !== id));
   };
 
-  // --- Unified Dark Neo-Brutalist Glass Theme ---
-  const styles = {
-    app: "min-h-screen bg-[#0a0a0a] text-white font-mono selection:bg-white selection:text-black relative overflow-hidden",
-    backgroundGlow: "absolute top-[-20%] left-[-10%] w-[50vw] h-[50vw] bg-white/5 blur-[120px] rounded-full pointer-events-none",
-    container: "max-w-3xl mx-auto p-6 pt-12 relative z-10",
-    header: "flex justify-between items-center mb-10 border-b-4 border-white/20 pb-6",
-    title: "text-4xl md:text-5xl font-black uppercase tracking-tighter drop-shadow-[4px_4px_0_rgba(255,255,255,0.2)]",
-    card: "bg-white/5 backdrop-blur-xl border-4 border-white shadow-[8px_8px_0px_#ffffff] rounded-none p-6 mb-8 transition-all hover:shadow-[12px_12px_0px_#ffffff]",
-    input: "w-full border-4 border-white p-4 bg-transparent focus:outline-none focus:bg-white/10 transition-colors rounded-none font-bold placeholder-white/40 text-lg",
-    select: "border-4 border-white p-4 bg-transparent focus:outline-none focus:bg-white/10 rounded-none font-bold [&>option]:text-black",
-    buttonPrimary: "bg-white text-black border-4 border-white p-4 font-black uppercase flex items-center justify-center gap-2 hover:-translate-y-1 shadow-[4px_4px_0px_rgba(255,255,255,0.4)] hover:shadow-[8px_8px_0px_rgba(255,255,255,0.6)] active:translate-y-1 active:shadow-none transition-all",
-    buttonIcon: "p-3 bg-transparent border-4 border-white hover:bg-white hover:text-black shadow-[4px_4px_0px_rgba(255,255,255,1)] active:translate-y-1 active:shadow-none transition-all",
-    reminderCard: "flex flex-col sm:flex-row sm:items-center justify-between p-5 mb-6 bg-white/10 backdrop-blur-md border-4 border-white shadow-[6px_6px_0px_#ffffff] rounded-none transition-all",
-    reminderInactive: "opacity-50 grayscale shadow-[2px_2px_0px_#ffffff]",
-    badge: "bg-black border-2 border-white px-3 py-1 text-xs font-bold uppercase tracking-wider",
-    dayBtn: "w-10 h-10 flex items-center justify-center border-2 border-white font-bold cursor-pointer transition-all",
-    dayBtnActive: "bg-white text-black shadow-[2px_2px_0px_#ffffff]",
-    dayBtnInactive: "bg-transparent text-white/50 hover:bg-white/20"
+  // Helper to format time remaining
+  const formatTimeRemaining = (nextTrigger) => {
+    const diff = nextTrigger - Date.now();
+    if (diff <= 0) return 'Triggering...';
+    
+    const h = Math.floor(diff / (1000 * 60 * 60));
+    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const s = Math.floor((diff % (1000 * 60)) / 1000);
+
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
   };
+
+  // Helper to force an update every second so the UI countdown ticks
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
-    <div className={styles.app}>
-      <div className={styles.backgroundGlow}></div>
-      <div className={styles.container}>
+    <div className="min-h-screen bg-[#FFE600] p-4 md:p-8 font-sans overflow-hidden relative">
+      {/* Abstract Background Elements for Neo-Brutalism */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-pink-500 rounded-full blur-[100px] opacity-60 pointer-events-none"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-cyan-400 rounded-full blur-[120px] opacity-60 pointer-events-none"></div>
+
+      {/* Hidden Audio Element */}
+      <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
+
+      <div className="max-w-3xl mx-auto relative z-10">
         
-        {/* Header */}
-        <header className={styles.header}>
-          <div className="flex items-center gap-4">
-            <div className="p-2 bg-white text-black border-2 border-white shadow-[4px_4px_0px_rgba(255,255,255,0.5)]">
-              <Bell size={32} />
+        {/* Header - Glassmorphic but with brutalist border */}
+        <header className="flex justify-between items-center mb-8 bg-white/40 backdrop-blur-md border-4 border-black p-4 rounded-2xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+          <div className="flex items-center gap-3">
+            <div className="bg-black text-white p-2 border-2 border-black rounded-lg">
+              <Bell size={28} className="animate-pulse" />
             </div>
-            <h1 className={styles.title}>RemindMe</h1>
+            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tighter text-black uppercase">
+              Ping<span className="text-pink-600">Me</span>
+            </h1>
           </div>
-          <div className="flex gap-4">
-            {installPrompt && (
-               <button onClick={handleInstallClick} className={styles.buttonIcon} title="Install App">
-                 <Download size={24} />
-               </button>
-            )}
-            <button onClick={() => setShowSettings(!showSettings)} className={styles.buttonIcon}>
-              <Settings size={24} />
-            </button>
-          </div>
+          <button 
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            className="bg-white border-4 border-black p-2 hover:bg-cyan-300 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-1 active:translate-y-1 active:shadow-none rounded-xl"
+          >
+            <Settings size={28} />
+          </button>
         </header>
 
-        {/* Permissions Banner */}
-        {notificationPermission !== 'granted' && (
-          <div className="p-4 mb-8 flex items-center justify-between bg-black border-4 border-white shadow-[6px_6px_0px_#ffffff]">
-            <div className="flex items-center gap-3">
-              <AlertTriangle size={24} className="text-white" />
-              <div>
-                <h3 className="font-bold uppercase tracking-wide">Notifications Disabled</h3>
-                <p className="text-sm text-white/70">Enable for background alerts.</p>
-              </div>
+        {/* Permission Warning */}
+        {permission !== 'granted' && (
+          <div className="mb-8 bg-red-400 border-4 border-black p-4 rounded-xl shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-black font-bold">
+              <AlertTriangle size={24} />
+              <p>Notifications are {permission}. The app won't work perfectly!</p>
             </div>
             <button 
-              onClick={requestNotificationPermission}
-              className="bg-white text-black px-4 py-2 font-bold uppercase hover:bg-gray-200 border-2 border-black"
+              onClick={requestPermission}
+              className="whitespace-nowrap bg-black text-white px-6 py-2 border-2 border-transparent hover:bg-gray-800 transition-colors rounded-lg font-bold"
             >
-              Enable
+              Enable Notifications
             </button>
           </div>
         )}
 
         {/* Settings Panel */}
-        {showSettings && (
-          <div className={styles.card}>
-            <h2 className="text-2xl mb-6 font-black uppercase border-b-2 border-white/20 pb-2">App Settings</h2>
-            <div className="flex items-center justify-between bg-white/5 p-4 border-2 border-white">
-              <div className="flex items-center gap-3">
-                {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}
-                <span className="font-bold uppercase tracking-wide">Audio Alerts</span>
+        {settingsOpen && (
+          <div className="mb-8 bg-white/70 backdrop-blur-xl border-4 border-black p-6 rounded-2xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transform transition-all">
+            <h2 className="text-2xl font-black mb-4 uppercase border-b-4 border-black pb-2">Settings</h2>
+            
+            <div className="space-y-4 font-bold text-lg">
+              <div className="flex items-center justify-between">
+                <span>Sound Alerts</span>
+                <button 
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  className={`p-3 border-4 border-black rounded-xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all ${soundEnabled ? 'bg-green-400' : 'bg-gray-300'}`}
+                >
+                  {soundEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}
+                </button>
               </div>
-              <button 
-                onClick={() => setSoundEnabled(!soundEnabled)}
-                className={`w-16 h-8 flex items-center p-1 cursor-pointer border-2 border-white ${soundEnabled ? 'bg-white/20' : 'bg-transparent'}`}
-              >
-                <div className={`h-full w-1/2 bg-white transition-transform ${soundEnabled ? 'translate-x-full' : ''}`}></div>
-              </button>
+
+              <div className="flex items-center justify-between">
+                <span>Browser Push Permissions</span>
+                <span className="uppercase text-sm bg-black text-white px-3 py-1 rounded-md">
+                  {permission}
+                </span>
+              </div>
+              <p className="text-sm font-medium text-gray-700 mt-2 bg-white/50 p-3 rounded-lg border-2 border-black border-dashed">
+                Note: For true background push notifications after deploying to Vercel, you will need to add a Service Worker (PWA) configuration to this app.
+              </p>
             </div>
           </div>
         )}
 
-        {/* Add Reminder Form */}
-        <form onSubmit={handleAddReminder} className={styles.card}>
-          <input
-            type="text"
-            placeholder="What needs to be done?"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            className={`${styles.input} mb-6`}
-            required
-          />
+        <div className="grid md:grid-cols-3 gap-8">
           
-          <div className="flex gap-4 mb-6 border-b-2 border-white/20 pb-6">
-            <button
-              type="button"
-              onClick={() => setMode('interval')}
-              className={`flex-1 p-3 font-bold uppercase border-4 border-white transition-all ${mode === 'interval' ? 'bg-white text-black shadow-[4px_4px_0px_rgba(255,255,255,0.5)]' : 'bg-transparent text-white/50 hover:text-white'}`}
-            >
-              Interval
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('schedule')}
-              className={`flex-1 p-3 font-bold uppercase border-4 border-white transition-all ${mode === 'schedule' ? 'bg-white text-black shadow-[4px_4px_0px_rgba(255,255,255,0.5)]' : 'bg-transparent text-white/50 hover:text-white'}`}
-            >
-              Scheduled
-            </button>
-          </div>
+          {/* Add Reminder Form */}
+          <div className="md:col-span-1 h-fit bg-pink-400/80 backdrop-blur-lg border-4 border-black p-6 rounded-2xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <h2 className="text-2xl font-black mb-6 uppercase flex items-center gap-2">
+              <Plus size={24} /> New Ping
+            </h2>
+            
+            <form onSubmit={addReminder} className="space-y-5">
+              <div>
+                <label className="block font-bold mb-2 uppercase text-sm tracking-wider">What to remember?</label>
+                <input 
+                  type="text" 
+                  value={taskName}
+                  onChange={(e) => setTaskName(e.target.value)}
+                  placeholder="Drink water..."
+                  className="w-full border-4 border-black p-3 font-bold bg-white focus:outline-none focus:bg-yellow-100 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] placeholder-gray-400 rounded-xl"
+                  required
+                />
+              </div>
 
-          <div className="min-h-[100px] mb-6">
-            {mode === 'interval' ? (
-              <div className="flex flex-col sm:flex-row gap-4 items-end animate-in fade-in slide-in-from-left-4 duration-300">
-                <div className="w-full sm:w-1/2">
-                  <label className="block mb-2 text-sm font-bold uppercase text-white/70">Repeat Every</label>
-                  <input
-                    type="number"
+              <div>
+                <label className="block font-bold mb-2 uppercase text-sm tracking-wider">Every...</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="number" 
+                    value={intervalValue}
+                    onChange={(e) => setIntervalValue(e.target.value)}
                     min="1"
-                    value={intervalVal}
-                    onChange={(e) => setIntervalVal(e.target.value)}
-                    className={styles.input}
+                    className="w-1/2 border-4 border-black p-3 font-bold bg-white focus:outline-none focus:bg-yellow-100 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] rounded-xl"
                     required
                   />
-                </div>
-                <div className="w-full sm:w-1/2">
                   <select 
-                    value={unit} 
-                    onChange={(e) => setUnit(e.target.value)}
-                    className={`${styles.select} w-full h-[64px]`}
+                    value={intervalUnit}
+                    onChange={(e) => setIntervalUnit(e.target.value)}
+                    className="w-1/2 border-4 border-black p-3 font-bold bg-white focus:outline-none focus:bg-yellow-100 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] rounded-xl cursor-pointer"
                   >
-                    <option value="seconds">Seconds (Testing)</option>
-                    <option value="minutes">Minutes</option>
-                    <option value="hours">Hours</option>
+                    <option value="seconds">Secs</option>
+                    <option value="minutes">Mins</option>
+                    <option value="hours">Hrs</option>
                   </select>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-                <div>
-                  <label className="block mb-2 text-sm font-bold uppercase text-white/70">Active Days</label>
-                  <div className="flex gap-2 flex-wrap">
-                    {DAYS.map(day => (
-                      <button
-                        key={`day-${day.id}`}
-                        type="button"
-                        onClick={() => toggleDay(day.id)}
-                        className={`${styles.dayBtn} ${selectedDays.includes(day.id) ? styles.dayBtnActive : styles.dayBtnInactive}`}
-                      >
-                        {day.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                   <label className="block mb-2 text-sm font-bold uppercase text-white/70">Time of Day</label>
-                   <input 
-                      type="time" 
-                      value={scheduledTime}
-                      onChange={(e) => setScheduledTime(e.target.value)}
-                      className={`${styles.input} [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:invert`}
-                      required 
-                    />
-                </div>
+
+              <button 
+                type="submit"
+                className="w-full bg-cyan-400 hover:bg-cyan-300 text-black border-4 border-black p-4 font-black text-xl uppercase tracking-widest shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:translate-x-1.5 active:translate-y-1.5 active:shadow-none transition-all rounded-xl mt-4"
+              >
+                Add Ping
+              </button>
+            </form>
+          </div>
+
+          {/* Reminders List */}
+          <div className="md:col-span-2 space-y-6">
+            {reminders.length === 0 ? (
+              <div className="bg-white/40 backdrop-blur-md border-4 border-black border-dashed p-12 text-center rounded-2xl">
+                <Clock size={48} className="mx-auto mb-4 opacity-50" />
+                <h3 className="text-2xl font-black uppercase text-gray-800">No Pings Yet!</h3>
+                <p className="font-bold text-gray-600">Create one to get started.</p>
               </div>
+            ) : (
+              reminders.map(reminder => (
+                <div 
+                  key={reminder.id} 
+                  className={`relative overflow-hidden border-4 border-black p-5 rounded-2xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transition-all ${
+                    reminder.active 
+                      ? 'bg-white/80 backdrop-blur-md' 
+                      : 'bg-gray-300/80 backdrop-blur-md grayscale'
+                  }`}
+                >
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="flex-1">
+                      <h3 className={`text-2xl font-black mb-1 ${reminder.active ? 'text-black' : 'text-gray-600 line-through'}`}>
+                        {reminder.text}
+                      </h3>
+                      
+                      <div className="flex items-center gap-3 mt-3">
+                        {reminder.type === 'schedule' ? (
+                          <span className="bg-black text-white px-3 py-1 text-sm font-bold rounded-md uppercase tracking-wider flex items-center gap-1">
+                            <CalendarDays size={16} />
+                            {reminder.scheduleTime} ({reminder.scheduleDays.length} days)
+                          </span>
+                        ) : (
+                          <span className="bg-black text-white px-3 py-1 text-sm font-bold rounded-md uppercase tracking-wider">
+                            {reminder.intervalMs / 1000 >= 60 
+                              ? reminder.intervalMs / (1000 * 60) >= 60
+                                ? `${reminder.intervalMs / (1000 * 60 * 60)} hrs`
+                                : `${reminder.intervalMs / (1000 * 60)} mins`
+                              : `${reminder.intervalMs / 1000} secs`
+                            }
+                          </span>
+                        )}
+                        
+                        {reminder.active && (
+                          <span className="text-pink-600 font-bold flex items-center gap-1 bg-pink-100 px-3 py-1 rounded-md border-2 border-pink-600">
+                            <Clock size={16} /> 
+                            {formatTimeRemaining(reminder.nextTrigger)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <button 
+                        onClick={() => toggleReminder(reminder.id)}
+                        className={`p-2 border-4 border-black rounded-xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all ${
+                          reminder.active ? 'bg-yellow-400 hover:bg-yellow-300' : 'bg-green-400 hover:bg-green-300'
+                        }`}
+                        title={reminder.active ? "Pause Reminder" : "Resume Reminder"}
+                      >
+                        {reminder.active ? <Pause size={20} /> : <Play size={20} />}
+                      </button>
+                      <button 
+                        onClick={() => deleteReminder(reminder.id)}
+                        className="p-2 bg-red-400 hover:bg-red-300 border-4 border-black rounded-xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
+                        title="Delete Reminder"
+                      >
+                        <Trash2 size={20} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar Visual (Optional flair) */}
+                  {reminder.active && (
+                    <div className="absolute bottom-0 left-0 h-1.5 bg-black w-full opacity-20">
+                      <div 
+                        className="h-full bg-pink-500 transition-all duration-1000 ease-linear"
+                        style={{ 
+                          width: `${Math.max(0, 100 - ((reminder.nextTrigger - Date.now()) / reminder.intervalMs * 100))}%` 
+                        }}
+                      ></div>
+                    </div>
+                  )}
+                </div>
+              ))
             )}
           </div>
 
-          <button type="submit" className={`${styles.buttonPrimary} w-full`}>
-            <Plus size={24} /> Create Routine
-          </button>
-        </form>
-
-        {/* Active Reminders List */}
-        <div>
-          <h2 className="text-3xl mb-8 font-black uppercase tracking-tight flex items-center gap-3 border-b-4 border-white/20 pb-4">
-            <Clock size={28} /> Active Routines
-          </h2>
-          
-          {reminders.length === 0 ? (
-            <div className="text-center py-16 border-4 border-dashed border-white/30 text-white/50 font-bold uppercase tracking-widest text-lg">
-              Void. Empty. Create a routine.
-            </div>
-          ) : (
-            reminders.map(reminder => (
-              <div 
-                key={reminder.id} 
-                className={`${styles.reminderCard} ${!reminder.active ? styles.reminderInactive : ''}`}
-              >
-                <div className="flex-grow mb-4 sm:mb-0">
-                  <h3 className="text-xl font-black tracking-wide mb-3">{reminder.text}</h3>
-                  <div className="flex flex-wrap items-center gap-3">
-                    {reminder.mode === 'interval' ? (
-                      <span className={styles.badge}>
-                        Every {reminder.intervalVal} {reminder.unit}
-                      </span>
-                    ) : (
-                      <>
-                        <span className={styles.badge}>
-                          <Calendar size={12} className="inline mr-1 mb-0.5" />
-                          {reminder.days.length === 7 ? 'Everyday' : `${reminder.days.length} Days`} @ {reminder.time}
-                        </span>
-                      </>
-                    )}
-
-                    {reminder.active && reminder.mode === 'interval' && (
-                      <span className="text-xs font-bold text-white/60">
-                        Next: {new Date(reminder.nextRun).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="flex gap-3 sm:ml-6 shrink-0">
-                  <button 
-                    onClick={() => toggleReminder(reminder.id)}
-                    className={`p-3 border-4 border-white transition-all shadow-[4px_4px_0px_rgba(255,255,255,0.3)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_rgba(255,255,255,0.5)] active:translate-y-1 active:shadow-none ${reminder.active ? 'bg-white/10' : 'bg-white text-black'}`}
-                  >
-                    {reminder.active ? <Square size={20} /> : <Play size={20} />}
-                  </button>
-                  <button 
-                    onClick={() => deleteReminder(reminder.id)}
-                    className="p-3 bg-red-600 border-4 border-white text-white hover:bg-red-500 shadow-[4px_4px_0px_rgba(255,255,255,0.3)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_rgba(255,255,255,0.5)] active:translate-y-1 active:shadow-none transition-all"
-                  >
-                    <Trash2 size={20} />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
         </div>
-        
       </div>
     </div>
   );
