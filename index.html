@@ -134,10 +134,16 @@
                 FULL SCREEN PRO
             </p>
         </div>
-        <button id="offline-sync-btn" class="bg-[#fde047] p-2 md:px-4 md:py-2 border-3 border-black font-black text-sm md:text-base btn-brutal flex items-center gap-2">
-            <i data-lucide="smartphone" class="w-5 h-5"></i>
-            <span class="hidden md:inline">Offline Sync</span>
-        </button>
+        <div class="flex gap-2">
+            <button id="quick-test-btn" class="bg-[#93c5fd] p-2 md:px-4 md:py-2 border-3 border-black font-black text-sm md:text-base btn-brutal flex items-center gap-2">
+                <i data-lucide="bell" class="w-5 h-5"></i>
+                <span class="hidden md:inline">Test API</span>
+            </button>
+            <button id="offline-sync-btn" class="bg-[#fde047] p-2 md:px-4 md:py-2 border-3 border-black font-black text-sm md:text-base btn-brutal flex items-center gap-2">
+                <i data-lucide="smartphone" class="w-5 h-5"></i>
+                <span class="hidden md:inline">Offline Sync</span>
+            </button>
+        </div>
     </div>
 
     <!-- Main Workspace -->
@@ -272,8 +278,8 @@
             const syncModal = document.getElementById('sync-modal');
 
             // --- VERCEL VAPID SETUP ---
-            // Replace this with your PUBLIC VAPID KEY once you generate it!
-            const PUBLIC_VAPID_KEY = 'YOUR_PUBLIC_VAPID_KEY_HERE'; 
+            // Your actual PUBLIC VAPID KEY is now here!
+            const PUBLIC_VAPID_KEY = 'BN8LnqbjlXVLn7_mdUIeqHFInouivg-AeckS7pAZPFqyV99vUtoD0fjUTWI6O7EUvkAbK4FGL9znJ1eyXrHmPjk'; 
             let pushSubscription = JSON.parse(localStorage.getItem('push_sub')) || null;
 
             // Helper to convert VAPID key format
@@ -324,6 +330,39 @@
                     });
                 } catch (err) {
                     console.error('Push failed', err);
+                }
+            });
+
+            // Quick test button in header
+            document.getElementById('quick-test-btn').addEventListener('click', async () => {
+                if (!pushSubscription) {
+                    alert('Please click "Offline Sync" and subscribe to notifications first!');
+                    return;
+                }
+                try {
+                    // Give a tiny bit of loading visual feedback
+                    const btn = document.getElementById('quick-test-btn');
+                    const originalHTML = btn.innerHTML;
+                    btn.innerHTML = '<i data-lucide="loader" class="w-5 h-5 animate-spin"></i><span class="hidden md:inline">Sending...</span>';
+                    lucide.createIcons();
+                    
+                    await fetch('/api/send-push', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            subscription: pushSubscription,
+                            payload: { title: 'API Test Success!', body: 'Your Vercel API backend is connected perfectly!' }
+                        })
+                    });
+                    
+                    setTimeout(() => {
+                        btn.innerHTML = originalHTML;
+                        lucide.createIcons();
+                    }, 1000);
+                    
+                } catch (err) {
+                    console.error('API Test failed', err);
+                    alert('Failed to contact the API!');
                 }
             });
 
