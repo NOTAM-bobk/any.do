@@ -1,1 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RemindMe - PWA</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 
+    <script>
+        // --- 1. INLINE PWA MANIFEST ---
+        // Dynamically generating the manifest to keep the project in a single file structure
+        const manifestData = {
+            "name": "RemindMe PWA",
+            "short_name": "RemindMe",
+            "start_url": "./",
+            "display": "standalone",
+            "background_color": "#f3f4f6",
+            "theme_color": "#3b82f6",
+            "icons": [
+                {
+                    "src": "icon.png",
+                    "sizes": "192x192",
+                    "type": "image/png"
+                },
+                {
+                    "src": "icon.png",
+                    "sizes": "512x512",
+                    "type": "image/png"
+                }
+            ]
+        };
+        const manifestBlob = new Blob([JSON.stringify(manifestData)], { type: 'application/manifest+json' });
+        const manifestUrl = URL.createObjectURL(manifestBlob);
+        document.write(`<link rel="manifest" href="${manifestUrl}">`);
+
+        // --- 2. INLINE SERVICE WORKER ---
+        if ('serviceWorker' in navigator) {
+            const swLogic = `
+                const CACHE_NAME = 'remindme-v1';
+                self.addEventListener('install', (e) => self.skipWaiting());
+                self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
+                self.addEventListener('fetch', (e) => {
+                    // Simple network-first strategy for simplicity
+                    e.respondWith(
+                        fetch(e.request).catch(() => caches.match(e.request))
+                    );
+                });
+            `;
+            const swBlob = new Blob([swLogic], { type: 'application/javascript' });
+            const swUrl = URL.createObjectURL(swBlob);
+            
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register(swUrl)
+                    .then(reg => console.log('Service Worker registered successfully!'))
+                    .catch(err => console.error('Service Worker registration failed:', err));
+            });
+        }
+    </script>
+
+    <style>
+        /* Custom scrollbar for a cleaner look */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        body { -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans min-h-screen flex flex-col items-center py-10 px-4">
+
+    <!-- Main Container -->
+    <div class="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+        <!-- Header -->
+        <div class="bg-blue-600 p-6 text-white text-center rounded-t-2xl">
+            <div class="flex justify-center mb-2">
+                <i data-lucide="bell-ring" class="w-8 h-8"></i>
+            </div>
+            <h1 class="text-2xl font-bold tracking-wide">RemindMe</h1>
+            <p class="text-blue-200 text-sm mt-1">Never miss a task again</p>
+        </div>
+
+        <!-- Input Section -->
+        <div class="p-6 border-b border-gray-100 bg-gray-50">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">What to remember?</label>
+                    <input type="text" id="task-text" placeholder="e.g., Drink water, Call mom..." 
+                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">When?</label>
+                    <input type="datetime-local" id="task-time" 
+                        class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                </div>
+                <button id="add-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md">
+                    <i data-lucide="plus" class="w-5 h-5"></i> Add Reminder
+                </button>
+            </div>
+            
+            <div id="permission-warning" class="hidden mt-4 text-xs text-amber-600 bg-amber-50 p-3 rounded-md flex items-start gap-2 border border-amber-200">
+                <i data-lucide="alert-circle" class="w-4 h-4 mt-0.5 shrink-0"></i>
+                <span>Please allow notifications in your browser settings to receive alerts.</span>
+            </div>
+        </div>
+
+        <!-- Reminders List -->
+        <div class="p-4 max-h-[50vh] overflow-y-auto">
+            <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 px-2">Your Reminders</h2>
+            <div id="reminder-list" class="space-y-3">
+                <!-- Items will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize Lucide icons
+            lucide.createIcons();
+
+            let reminders = JSON.parse(localStorage.getItem('reminders')) || [];
+            
+            const taskText = document.getElementById('task-text');
+            const taskTime = document.getElementById('task-time');
+            const addBtn = document.getElementById('add-btn');
+            const reminderList = document.getElementById('reminder-list');
+            const permWarning = document.getElementById('permission-warning');
+
+            // --- NOTIFICATION PERMISSIONS ---
+            function checkPermissions() {
+                if ("Notification" in window) {
+                    if (Notification.permission === "default") {
+                        Notification.requestPermission();
+                    } else if (Notification.permission === "denied") {
+                        permWarning.classList.remove('hidden');
+                    }
+                } else {
+                    permWarning.classList.remove('hidden');
+                    permWarning.innerHTML = "Your browser does not support notifications.";
+                }
+            }
+            checkPermissions();
+
+            // --- STORAGE & RENDERING ---
+            function save() {
+                localStorage.setItem('reminders', JSON.stringify(reminders));
+            }
+
+            function formatTime(timestamp) {
+                const date = new Date(timestamp);
+                return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            }
+
+            function render() {
+                reminderList.innerHTML = '';
+                
+                if (reminders.length === 0) {
+                    reminderList.innerHTML = `
+                        <div class="text-center py-8 text-gray-400 flex flex-col items-center">
+                            <i data-lucide="inbox" class="w-12 h-12 mb-2 opacity-50"></i>
+                            <p>No reminders set.</p>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    return;
+                }
+
+                // Sort reminders: Upcoming first, then notified ones
+                const sortedReminders = [...reminders].sort((a, b) => {
+                    if (a.notified === b.notified) return a.time - b.time;
+                    return a.notified ? 1 : -1;
+                });
+
+                sortedReminders.forEach(r => {
+                    const item = document.createElement('div');
+                    const isPast = r.notified;
+                    
+                    item.className = `group flex items-center justify-between p-4 rounded-xl border transition-all ${
+                        isPast ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
+                    }`;
+                    
+                    item.innerHTML = `
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <div class="w-2 h-2 rounded-full shrink-0 ${isPast ? 'bg-gray-300' : 'bg-blue-500 animate-pulse'}"></div>
+                            <div class="overflow-hidden">
+                                <h3 class="font-semibold text-gray-800 truncate ${isPast ? 'line-through text-gray-500' : ''}">${r.text}</h3>
+                                <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                                    <i data-lucide="clock" class="w-3 h-3"></i>
+                                    ${formatTime(r.time)}
+                                </p>
+                            </div>
+                        </div>
+                        <button onclick="deleteReminder('${r.id}')" class="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors shrink-0">
+                            <i data-lucide="trash-2" class="w-5 h-5"></i>
+                        </button>
+                    `;
+                    reminderList.appendChild(item);
+                });
+                lucide.createIcons();
+            }
+
+            // --- ACTIONS ---
+            window.deleteReminder = (id) => {
+                reminders = reminders.filter(r => r.id !== id);
+                save();
+                render();
+            };
+
+            addBtn.addEventListener('click', () => {
+                const text = taskText.value.trim();
+                const time = taskTime.value;
+
+                if (!text || !time) {
+                    // Small visual shake or alert instead of browser alert
+                    addBtn.classList.add('animate-bounce');
+                    setTimeout(() => addBtn.classList.remove('animate-bounce'), 1000);
+                    return;
+                }
+
+                const targetTime = new Date(time).getTime();
+                if (targetTime < Date.now()) {
+                    // Time is in the past
+                    taskTime.classList.add('border-red-500');
+                    setTimeout(() => taskTime.classList.remove('border-red-500'), 1000);
+                    return;
+                }
+
+                reminders.push({
+                    id: crypto.randomUUID(),
+                    text,
+                    time: targetTime,
+                    notified: false
+                });
+
+                save();
+                render();
+                
+                // Clear inputs
+                taskText.value = '';
+                taskTime.value = '';
+                
+                // Check permissions again if user adds a task
+                checkPermissions();
+            });
+
+            // --- BACKGROUND CHECKER ---
+            setInterval(() => {
+                const now = Date.now();
+                let changed = false;
+
+                reminders.forEach(r => {
+                    if (!r.notified && now >= r.time) {
+                        r.notified = true;
+                        changed = true;
+                        
+                        // Trigger Notification
+                        if ("Notification" in window && Notification.permission === "granted") {
+                            new Notification("⏰ Reminder!", {
+                                body: r.text,
+                                icon: 'icon.png'
+                            });
+                        }
+                    }
+                });
+
+                if (changed) {
+                    save();
+                    render();
+                }
+            }, 1000); // Check every second
+
+            // Initial render
+            render();
+        });
+    </script>
+</body>
+</html>
