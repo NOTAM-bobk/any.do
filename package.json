@@ -6,6 +6,9 @@
   "scripts": {
     "start": "npx serve ."
   },
+  "dependencies": {
+    "web-push": "^3.6.6"
+  },
   "keywords": [
     "pwa",
     "reminder",
